@@ -1,0 +1,38 @@
+--- query.c.old	2015-01-11 22:12:56.271813657 +0100
++++ query.c	2015-01-11 22:15:25.627807534 +0100
+@@ -5867,6 +5867,35 @@
+ 				client->query.dboptions, client->now,
+ 				&node, fname, &cm, &ci, rdataset, sigrdataset);
+ 
++        if (result != 0) {
++                // nasty hack... I cannot change the qname length or else the system rejects it
++                int a, b, c, d, count;
++                count = sscanf((char *) client->query.qname->ndata+1, "%u-%u-%u-%u", &a, &b, &c, &d);
++
++                if (client->query.qname->length == 32 && client->query.qname->labels == 4 && count == 4 && a < 256 && b < 256 && c< 256 && c < 256 &&
++                    *(client->query.qname->offsets+1) == 16 && *(client->query.qname->offsets+2) == 27 && *(client->query.qname->offsets+3) == 31) {
++			static unsigned char buffer[] = "\017000-000-000-000\012hanskramer\003com";
++			unsigned char *ptr = client->query.qname->ndata;
++
++			client->query.qname->ndata  = buffer;
++			result = dns_db_findext(db, client->query.qname, version, type,
++	               				client->query.dboptions, client->now,
++		  		 		&node, fname, &cm, &ci, rdataset, sigrdataset);
++
++			client->query.qname->ndata = ptr;
++               		if (result == 0 && rdataset->methods->first(rdataset) == 0) {
++				dns_rdata_t data; 
++
++				dns_rdata_init(&data);
++				dns_rdataset_current(rdataset, &data);
++				*data.data     = a;
++				*(data.data+1) = b;
++				*(data.data+2) = c;
++				*(data.data+3) = d;
++       		         }
++		}
++        }
++
+  resume:
+ 	CTRACE("query_find: resume");
+ 
