@@ -5,6 +5,7 @@
 #    Date : Jan 2015
 #
 #  Working but plenty of bugs and half ass implementation
+#  However, this is the first working version
 #
 
 import SocketServer
@@ -70,8 +71,10 @@ class DNSMessage:
         return request + struct.pack("!BHH", 0, self._question[-2], self._question[-1])
        
     def pack_answer(self):
-        # need to handle multiple answers!
         request = ""
+        if self.get_header('ANCOUNT') == 0:
+            return ""    
+        # need to handle multiple answers!
         #for x in self._answer[0]:
         #    request += struct.pack("!B", len(x))
         #    request += x
@@ -118,6 +121,8 @@ class DNSMessage:
             self._header[1] |= value << 8 
         if field == 'RA':
             self._header[1] |= value << 7
+        if field == 'RCODE':
+            self._header[1] |= (value & 0x0f)
         if field == 'QDCOUNT':
             self._header[2] = value
         if field == 'ANCOUNT':
@@ -152,22 +157,36 @@ class DNSMessage:
 
 class DNSServer(SocketServer.BaseRequestHandler):
 
-    def handle(self):
-        data   = self.request[0]
+    def print_hex(self, text):
+        i = 0
+        for x in text:
+            i += 1
+            print "%02x" % ord(x),
+            if i % 16 == 0:
+                print
+        print
 
+
+    def send(self, data):
+        self.request[1].sendto(data, self.client_address) 
+
+
+    def not_found(self):
         dns_msg = DNSMessage() 
-        dns_msg.init(data)
+        dns_msg.init(self.request[0])
+        dns_msg._header[1] = 0
+        dns_msg.set_header("RCODE", 3)
+        dns_msg.set_header("QR", 1)
+        dns_msg.set_header("ANCOUNT", 0)
+        dns_msg.set_header("QDCOUNT", 1)
+        dns_msg.set_header("ARCOUNT", 0)
+        self.send(dns_msg.get_data()) 
 
-        print dns_msg.get_question()
-        try:
-            octets = map(int, dns_msg.get_question()[0].split('-'))
-            ip = (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
-        except:
-            ip = 0
- 
-        answer = [0xc00c, DNSMessage.A, DNSMessage.IN, 0xffff, 4, ip]
 
-        dns_msg.set_answer(answer)
+    def answer(self, ip):
+        dns_msg = DNSMessage() 
+        dns_msg.init(self.request[0])
+        dns_msg.set_answer([0xc00c, DNSMessage.A, DNSMessage.IN, 0xffff, 4, ip])
         dns_msg.set_header("QR", 1)
         dns_msg.set_header("AA", 1)
         dns_msg.set_header("RD", 0)
@@ -175,9 +194,31 @@ class DNSServer(SocketServer.BaseRequestHandler):
         dns_msg.set_header("ANCOUNT", 1)
         dns_msg.set_header("QDCOUNT", 1)
         dns_msg.set_header("ARCOUNT", 0)
+        self.send(dns_msg.get_data()) 
 
-        x2 = dns_msg.get_data()
-        self.request[1].sendto(x2, self.client_address) 
+
+    def get_request(self):
+        dns_msg = DNSMessage() 
+        dns_msg.init(self.request[0])
+        request = dns_msg.get_question()
+        try:
+            octets = map(int, request[0].split('-'))
+            for octet in octets:
+                if octet > 255:
+                    return None 
+            if len(octets) == 4:
+                return (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
+        except:
+            pass
+        return None
+
+
+    def handle(self):
+        ip = self.get_request()
+        if ip == None:
+            self.not_found()
+        else:
+            self.answer(ip)
 
 
 if __name__ == "__main__":
