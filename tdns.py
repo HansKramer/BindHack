@@ -4,7 +4,7 @@
 #
 #    Date : Jan 2015
 #
-#  This code is so not working yet, it ain't funny
+#  Working but plenty of bugs and half ass implementation
 #
 
 import SocketServer
@@ -25,20 +25,11 @@ class DNSMessage:
     HS = 4
 
     def init(self, request):
-        request, self._header   = request[12:], struct.unpack("!HHHHHH", request[0:12])
+        request, self._header     = request[12:], list(struct.unpack("!HHHHHH", request[0:12]))
         request, self._question   = self.unpack_question(request)
         request, self._answer     = self.unpack_answer(request)
         request, self._authority  = self.unpack_authority(request)
         request, self._additional = self.unpack_additional(request)
-
-    def get_data(self):
-        request = struct.pack("!HHHHHH", *self._header)
-        for x in self._question[:-2]:
-            print x
-            request += struct.pack("!B", len(x))
-            request += x
-        request += struct.pack("!BHH", 0, self._question[-2], self._question[-1])
-        return request
 
     def unpack_question(self, request):
         # fix me when QDCOUNT != 1
@@ -59,10 +50,40 @@ class DNSMessage:
         # fix me
         return (request[1:], request[0])
 
+    def get_data(self):
+        request  = self.pack_header()
+        request += self.pack_question()
+        request += self.pack_answer()
+        return request
+
+    def get_question(self):
+        return self._question
+
+    def pack_header(self):
+        return struct.pack("!HHHHHH", *self._header)
+
+    def pack_question(self):
+        request = ""
+        for x in self._question[:-2]:
+            request += struct.pack("!B", len(x))
+            request += x
+        return request + struct.pack("!BHH", 0, self._question[-2], self._question[-1])
+       
     def pack_answer(self):
-        for answer in self._answer:
-            print answer 
-        return None
+        # need to handle multiple answers!
+        request = ""
+        #for x in self._answer[0]:
+        #    request += struct.pack("!B", len(x))
+        #    request += x
+        #request += struct.pack("!B", 0)
+        
+        request += struct.pack("!H", self._answer[0])
+        request += struct.pack("!H", self._answer[1])
+        request += struct.pack("!H", self._answer[2])
+        request += struct.pack("!L", self._answer[3])
+        request += struct.pack("!H", self._answer[4])
+        request += struct.pack("!L", self._answer[5])
+        return request
 
     def unpack_authority(self, request):
         if self.get_header('NSCOUNT') == 0:
@@ -85,6 +106,27 @@ class DNSMessage:
 #        z      = (header[1] & 0x0070) >> 4
 #        rcode  = (header[1] & 0x000f)
 
+    def set_answer(self, answer):
+        self._answer = answer
+
+    def set_header(self, field, value): 
+        if field == 'QR':
+            self._header[1] |= value << 15 
+        if field == 'AA':
+            self._header[1] |= value << 10 
+        if field == 'RD':
+            self._header[1] |= value << 8 
+        if field == 'RA':
+            self._header[1] |= value << 7
+        if field == 'QDCOUNT':
+            self._header[2] = value
+        if field == 'ANCOUNT':
+            self._header[3] = value
+        if field == 'NSCOUNT':
+            self._header[4] = value
+        if field == 'ARCOUNT':
+            self._header[5] = value
+
     def get_header(self, field):
         if field == 'ID':
             return self._header[0]
@@ -103,40 +145,43 @@ class DNSMessage:
         return None
 
     def __repr__(self):
-        return str(self._header) + str(self._question) + str(self._answer) + str(self._authority) + str(self._additional)
+        return "header:   " + str(self._header)   + "\n" +  \
+               "question: " + str(self._question) + "\n" +  \
+               "answer:   " + str(self._answer)   + "\n" + str(self._authority) + str(self._additional)
       
 
 class DNSServer(SocketServer.BaseRequestHandler):
 
     def handle(self):
         data   = self.request[0]
-        print len(data)
+
         dns_msg = DNSMessage() 
         dns_msg.init(data)
-        print dns_msg.get_header('RD')
-        print dns_msg
+
+        print dns_msg.get_question()
+        try:
+            octets = map(int, dns_msg.get_question()[0].split('-'))
+            ip = (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
+        except:
+            ip = 0
+ 
+        answer = [0xc00c, DNSMessage.A, DNSMessage.IN, 0xffff, 4, ip]
+
+        dns_msg.set_answer(answer)
+        dns_msg.set_header("QR", 1)
+        dns_msg.set_header("AA", 1)
+        dns_msg.set_header("RD", 0)
+        dns_msg.set_header("RA", 1)
+        dns_msg.set_header("ANCOUNT", 1)
+        dns_msg.set_header("QDCOUNT", 1)
+        dns_msg.set_header("ARCOUNT", 0)
+
         x2 = dns_msg.get_data()
-        x1 = data
-        print len(x1), len(x2)
-        if x1 == x2:
-            print "equal"
-        dns_msg._answer = [("fuck2", "hanskramer", "com"), DNSMessage.A, DNSMessage.IN, 0xffff, 4, 0]
-         
-#        host = "hanskramer.com"
-#        port = 53
-#        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#        sock.sendto(data, (host, port)) 
-#        recv = sock.recv(1024)
-#        dns_msg = DNSMessage() 
-#        dns_msg.init(data)
-#        print "received", dns_msg
-        
-        
-        #socket.sendto(data.upper(), self.client_address)
+        self.request[1].sendto(x2, self.client_address) 
+
 
 if __name__ == "__main__":
     host = "localhost"
     port = 53
     server = SocketServer.UDPServer((host, port), DNSServer)
     server.serve_forever()
-    print "bye!"
