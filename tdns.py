@@ -33,23 +33,40 @@ class DNSMessage:
         request, self._additional = self.unpack_additional(request)
 
     def unpack_question(self, request):
+        if self.get_header('QDCOUNT') == 0:
+            return (request, None)
         # fix me when QDCOUNT != 1
-        question = []
-        index    = 0
+        # and fix index checking
+        qname = []
+        index = 0
         while True:
             oct_len = struct.unpack('!B', request[index])[0]
             if oct_len == 0:
-                question.append(struct.unpack("!H", request[index+1:index+3])[0])
-                question.append(struct.unpack("!H", request[index+3:index+5])[0])
-                return (request[index+5:], question)
-            question.append(request[index+1:index+oct_len+1])
+                qtype  = struct.unpack("!H", request[index+1:index+3])[0]
+                qclass = struct.unpack("!H", request[index+3:index+5])[0]
+                return (request[index+5:], [qname, qtype, qclass])
+            qname.append(request[index+1:index+oct_len+1])
             index += oct_len + 1
 
+    def unpack_resource_section(self, request):
+        resource = []
+        oct_len = struct.unpack("!B", request[0])[0]
+        if oct_len & 0xc0 == 0xc0: # it's a pointer!
+            resource += [struct.unpack("!H", request[0:2])[0] & 0x3f]
+            index = 4
+        else:
+            print "implement me"
+        resource += struct.unpack("!HHHH", request[index:index+8])
+        # fix me: assume A IN
+        resource += struct.unpack("!L", request[index+8:index+12])
+        return resource
+
+        
     def unpack_answer(self, request):
         if self.get_header('ANCOUNT') == 0:
             return (request, [])
-        # fix me
-        return (request[1:], request[0])
+        answer = self.unpack_resource_section(request)
+        return (request[1:], answer)
 
     def get_data(self):
         request  = self.pack_header()
@@ -64,11 +81,12 @@ class DNSMessage:
         return struct.pack("!HHHHHH", *self._header)
 
     def pack_question(self):
+        # fix if question != 1
         request = ""
-        for x in self._question[:-2]:
+        for x in self._question[0]:
             request += struct.pack("!B", len(x))
             request += x
-        return request + struct.pack("!BHH", 0, self._question[-2], self._question[-1])
+        return request + struct.pack("!BHH", 0, self._question[1], self._question[2])
        
     def pack_answer(self):
         request = ""
@@ -139,6 +157,8 @@ class DNSMessage:
             return (self._header[1] & 0x8000) >> 15
         if field == 'RD':
             return (self._header[1] & 0x0100) >> 8
+        if field == 'RCODE':
+            return self._header[1] & 0x0f
         if field == 'QDCOUNT':
             return self._header[2]
         if field == 'ANCOUNT':
@@ -197,19 +217,35 @@ class DNSServer(SocketServer.BaseRequestHandler):
         self.send(dns_msg.get_data()) 
 
 
+    def recursion(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(self.request[0], ("192.168.1.3", 53))
+        received = sock.recv(4096)
+        dns_msg = DNSMessage() 
+        dns_msg.init(received)
+        if dns_msg.get_header("RCODE") != 0:
+            return None
+        else:
+            return dns_msg._answer[5]
+
+
     def get_request(self):
         dns_msg = DNSMessage() 
         dns_msg.init(self.request[0])
         request = dns_msg.get_question()
-        try:
-            octets = map(int, request[0].split('-'))
-            for octet in octets:
-                if octet > 255:
-                    return None 
-            if len(octets) == 4:
-                return (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
-        except:
-            pass
+        if request[1] == DNSMessage.A and request[2] == DNSMessage.IN:
+            try:
+                octets = map(int, request[0][0].split('-'))
+                for octet in octets:
+                    if octet > 255:
+                        raise Exception
+                if len(octets) == 4:
+                    return (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
+            except:
+                pass
+            return self.recursion()
+        else:
+            print "We don't handle:", request[1], request[2]
         return None
 
 
