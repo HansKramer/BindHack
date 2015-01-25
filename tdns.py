@@ -155,6 +155,8 @@ class DNSMessage:
             return self._header[0]
         if field == 'QR':
             return (self._header[1] & 0x8000) >> 15
+        if field == 'AA':
+            return (self._header[1] & 0x0400) >> 10
         if field == 'RD':
             return (self._header[1] & 0x0100) >> 8
         if field == 'RCODE':
@@ -203,12 +205,12 @@ class DNSServer(SocketServer.BaseRequestHandler):
         self.send(dns_msg.get_data()) 
 
 
-    def answer(self, ip):
+    def answer(self, ip, auth):
         dns_msg = DNSMessage() 
         dns_msg.init(self.request[0])
         dns_msg.set_answer([0xc00c, DNSMessage.A, DNSMessage.IN, 0xffff, 4, ip])
         dns_msg.set_header("QR", 1)
-        dns_msg.set_header("AA", 1)
+        dns_msg.set_header("AA", auth)
         dns_msg.set_header("RD", 0)
         dns_msg.set_header("RA", 1)
         dns_msg.set_header("ANCOUNT", 1)
@@ -224,9 +226,9 @@ class DNSServer(SocketServer.BaseRequestHandler):
         dns_msg = DNSMessage() 
         dns_msg.init(received)
         if dns_msg.get_header("RCODE") != 0:
-            return None
+            return None, True
         else:
-            return dns_msg._answer[5]
+            return dns_msg._answer[5], dns_msg.get_header("AA")
 
 
     def get_request(self):
@@ -240,7 +242,7 @@ class DNSServer(SocketServer.BaseRequestHandler):
                     if octet > 255:
                         raise Exception
                 if len(octets) == 4:
-                    return (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3]
+                    return (((((octets[0]<<8) + octets[1])<<8) + octets[2])<<8) + octets[3], True
             except:
                 pass
             return self.recursion()
@@ -250,11 +252,11 @@ class DNSServer(SocketServer.BaseRequestHandler):
 
 
     def handle(self):
-        ip = self.get_request()
+        ip, auth = self.get_request()
         if ip == None:
             self.not_found()
         else:
-            self.answer(ip)
+            self.answer(ip, auth)
 
 
 if __name__ == "__main__":
