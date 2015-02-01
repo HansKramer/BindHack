@@ -30,10 +30,15 @@ func (dns DNSServer) Run() {
     for {
         rlen, remote, err := sock.ReadFromUDP(buf[:])
         fmt.Println(buf)
-        r := bytes.NewBuffer(buf[:])
-        var value int16
-        binary.Read(r, binary.BigEndian, &value)   
-        fmt.Printf("header : %02X\n", value)
+        r := bytes.NewBuffer(buf[0:6])
+        var id, status, qdcount, ancount uint16
+        binary.Read(r, binary.BigEndian, &id)   
+        binary.Read(r, binary.BigEndian, &status)   
+        binary.Read(r, binary.BigEndian, &qdcount)   
+        binary.Read(r, binary.BigEndian, &ancount)   
+//        binary.Read(r, binary.BigEndian, &nscount)   
+//        binary.Read(r, binary.BigEndian, &arcount)   
+        fmt.Printf("header : %04X %04X %04X %04X\n", id, status, qdcount, ancount)
         fmt.Println(remote)
         fmt.Println(err)
         fmt.Println(rlen)
