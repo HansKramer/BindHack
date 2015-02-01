@@ -12,6 +12,9 @@ package main
 
 import "fmt"
 import "net"
+import "encoding/binary"
+import "bytes"
+
 
 type DNSServer struct {
     addr *net.UDPAddr
@@ -27,6 +30,10 @@ func (dns DNSServer) Run() {
     for {
         rlen, remote, err := sock.ReadFromUDP(buf[:])
         fmt.Println(buf)
+        r := bytes.NewBuffer(buf[:])
+        var value int16
+        binary.Read(r, binary.BigEndian, &value)   
+        fmt.Printf("header : %02X\n", value)
         fmt.Println(remote)
         fmt.Println(err)
         fmt.Println(rlen)
