@@ -34,16 +34,16 @@ type DNSQuestion struct {
 
 type DNSAnswer struct {
     name     []string
-    type     uint16
+    atype    uint16
     class    uint16 
     ttl      uint16
     rdlength uint16
     rdata    []byte
 }
 
-type DNSAnswer struct {
+type DNSAuthority struct {
     name     []string
-    type     uint16
+    atype    uint16
     class    uint16 
     ttl      uint16
     rdlength uint16
@@ -51,10 +51,11 @@ type DNSAnswer struct {
 }
 
 type DNSServer struct {
-    addr     *net.UDPAddr
-    header   DNSHeader
-    question DNSQuestion 
-    answer   DNSAnswer
+    addr      *net.UDPAddr
+    header    DNSHeader
+    question  DNSQuestion 
+    answer    DNSAnswer
+    authority DNSAuthority
 }
 
 
@@ -84,6 +85,12 @@ func (question *DNSQuestion) Init(s *bytes.Buffer) {
     }
 }
 
+func (answer *DNSAnswer) Init(s *bytes.Buffer) {
+}
+
+func (answer *DNSAuthority) Init(s *bytes.Buffer) {
+}
+
 func (header DNSHeader) GetField(field string) uint16 {
     if field == "ID" {
         return header.id
@@ -104,20 +111,26 @@ func (dns DNSServer) Run() {
     for {
         rlen, remote, err := sock.ReadFromUDP(buf[:])
 
+        fmt.Println(rlen)
         fmt.Println(buf)
-        r := bytes.NewBuffer(buf[:])
+        r := bytes.NewBuffer(buf[:rlen])
+        fmt.Println(r)
         dns.header.Init(r)
         if dns.header.qdcount > 0 {  // for now only handle a single question requests 
             dns.question.Init(r)
         }
         if dns.header.ancount > 0 {
-            dns.
+            dns.answer.Init(r)
+        } 
+        if dns.header.arcount > 0 {
+            dns.authority.Init(r)
         } 
  
+
 //        fmt.Printf("header : %04X %04X %04X %04X\n", id, status, qdcount, ancount)
         fmt.Println(remote)
         fmt.Println(err)
-        fmt.Println(rlen)
+
         fmt.Println(dns.header.GetField("ID"))
         fmt.Println(dns.header.GetField("QR"))
         fmt.Println(dns.question)
