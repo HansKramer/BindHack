@@ -101,6 +101,17 @@ func (header Header) Pack() []byte {
     return buf.Bytes()
 }
 
+func (header Header) GetField(field string) uint16 {
+    switch field {
+    case "ID":
+        return header.id
+    case "QR":
+        return (header.status & 0x8000) >> 15
+    // to be implemented 
+    }
+    return 0
+}
+
 func ReadFQName(s *bytes.Buffer) []string {
     var oct_len uint8
     var data    []string
@@ -121,6 +132,7 @@ func WriteFQName(name []string) []byte {
         binary.Write(buf, binary.BigEndian, length)
         buf.WriteString(label)
     }
+    binary.Write(buf, binary.BigEndian, byte(0))
 
     return buf.Bytes()
 }
@@ -206,21 +218,6 @@ type DNSServer struct {
 }
 
 
-func (header *DNSHeader) Init(r io.Reader) {
-    binary.Read(r, binary.BigEndian, &header.id)
-    binary.Read(r, binary.BigEndian, &header.status)
-    binary.Read(r, binary.BigEndian, &header.qdcount)
-    binary.Read(r, binary.BigEndian, &header.ancount)
-    binary.Read(r, binary.BigEndian, &header.nscount)
-    binary.Read(r, binary.BigEndian, &header.arcount)
-}
-
-func (question *DNSQuestion) Init(s *bytes.Buffer) {
-    question.qname = ReadFQName(s)
-    binary.Read(io.Reader(s), binary.BigEndian, &question.qtype)
-    binary.Read(io.Reader(s), binary.BigEndian, &question.qclass)
-}
-
 func (answer *DNSAnswer) Init(s *bytes.Buffer) {
     answer.name  = ReadFQName(s)
     binary.Read(io.Reader(s), binary.BigEndian, &answer.atype)
@@ -239,14 +236,25 @@ func (authority *DNSAuthority) Init(s *bytes.Buffer) {
 //  authority.rdata =
 }
 
-func (header DNSHeader) GetField(field string) uint16 {
-    if field == "ID" {
-        return header.id
-    }
-    if field == "QR" {
-        return (header.status & 0x8000) >> 15
-    }
-    return 0
+
+func (message Message) HandleAIn() {
+    fmt.Println("Handlke A In")
+    fmt.Println(message.question[0].qname)
+
+    connection, _ := net.Dial("udp", "192.168.1.3:53")
+    fmt.Println(connection)
+
+    var buf [max_message_length]byte
+
+//My req [85 79 1 0 0 1 0 0 0 0 0 0 7 48 45 48 45 48 45 48 10 104 97 110 115 107 114 97 109 101 114 3 99 111 109 0 1 0 1]
+    fmt.Println(message.Pack())
+    connection.Write(message.Pack())
+    connection.Read(buf[:])
+
+    fmt.Println("Answer")
+    fmt.Println(buf)
+
+    connection.Close()
 }
 
 
@@ -262,14 +270,17 @@ func (dns DNSServer) Run() {
         fmt.Println(remote)
 
         fmt.Println(rlen)
-        fmt.Println(buf)
+        fmt.Println(buf[0:rlen])
         r := bytes.NewBuffer(buf[:rlen])
         fmt.Println(r)
 
         var message Message 
         message.Unpack(r)
-        if message.question[0].qtype == A {
-            fmt.Println("A Record")
+        
+        if message.header.qdcount>0 && message.question[0].qclass == IN {
+            if message.question[0].qtype == A {
+                message.HandleAIn()
+            }
         }
         fmt.Println(message.Pack())
         fmt.Println(message.question[0].qtype)
